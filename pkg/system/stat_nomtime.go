@@ -1,4 +1,4 @@
-// +build !linux,!windows,!nacl
+// +build nacl openbsd
 
 package system
 
@@ -12,6 +12,5 @@ func fromStatT(s *syscall.Stat_t) (*Stat_t, error) {
 		mode: uint32(s.Mode),
 		uid:  s.Uid,
 		gid:  s.Gid,
-		rdev: uint64(s.Rdev),
-		mtim: s.Mtimespec}, nil
+		rdev: uint64(s.Rdev)}, nil
 }

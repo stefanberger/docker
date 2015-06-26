@@ -1,4 +1,4 @@
-//+build !nacl
+//+build nacl
 
 package archive
 
@@ -182,12 +182,15 @@ func ApplyLayer(dest string, layer ArchiveReader) (int64, error) {
 	dest = filepath.Clean(dest)
 
 	// We need to be able to set any perms
+	/*
 	oldmask, err := system.Umask(0)
 	if err != nil {
 		return 0, err
 	}
 	defer system.Umask(oldmask) // ignore err, ErrNotSupportedPlatform
+	*/
 
+	var err error
 	layer, err = DecompressStream(layer)
 	if err != nil {
 		return 0, err

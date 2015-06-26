@@ -1,4 +1,4 @@
-// +build !windows,!nacl
+// +build nacl
 
 package term
 
@@ -7,8 +7,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"syscall"
-	"unsafe"
 )
 
 var (
@@ -16,7 +14,6 @@ var (
 )
 
 type State struct {
-	termios Termios
 }
 
 type Winsize struct {
@@ -42,27 +39,16 @@ func GetFdInfo(in interface{}) (uintptr, bool) {
 
 func GetWinsize(fd uintptr) (*Winsize, error) {
 	ws := &Winsize{}
-	_, _, err := syscall.Syscall(syscall.SYS_IOCTL, fd, uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(ws)))
-	// Skipp errno = 0
-	if err == 0 {
-		return ws, nil
-	}
-	return ws, err
+	return ws, nil
 }
 
 func SetWinsize(fd uintptr, ws *Winsize) error {
-	_, _, err := syscall.Syscall(syscall.SYS_IOCTL, fd, uintptr(syscall.TIOCSWINSZ), uintptr(unsafe.Pointer(ws)))
-	// Skipp errno = 0
-	if err == 0 {
-		return nil
-	}
-	return err
+	return nil
 }
 
 // IsTerminal returns true if the given file descriptor is a terminal.
 func IsTerminal(fd uintptr) bool {
-	var termios Termios
-	return tcget(fd, &termios) == 0
+	return true
 }
 
 // Restore restores the terminal connected to the given file descriptor to a
@@ -71,39 +57,22 @@ func RestoreTerminal(fd uintptr, state *State) error {
 	if state == nil {
 		return ErrInvalidState
 	}
-	if err := tcset(fd, &state.termios); err != 0 {
-		return err
-	}
 	return nil
 }
 
 func SaveState(fd uintptr) (*State, error) {
 	var oldState State
-	if err := tcget(fd, &oldState.termios); err != 0 {
-		return nil, err
-	}
-
 	return &oldState, nil
 }
 
 func DisableEcho(fd uintptr, state *State) error {
-	newState := state.termios
-	newState.Lflag &^= syscall.ECHO
-
-	if err := tcset(fd, &newState); err != 0 {
-		return err
-	}
 	handleInterrupt(fd, state)
 	return nil
 }
 
 func SetRawTerminal(fd uintptr) (*State, error) {
-	oldState, err := MakeRaw(fd)
-	if err != nil {
-		return nil, err
-	}
-	handleInterrupt(fd, oldState)
-	return oldState, err
+	oldState := State{}
+	return &oldState, nil
 }
 
 func handleInterrupt(fd uintptr, state *State) {

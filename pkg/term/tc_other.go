@@ -1,5 +1,6 @@
 // +build !windows
 // +build !linux !cgo
+// +build !nacl
 
 package term
 
