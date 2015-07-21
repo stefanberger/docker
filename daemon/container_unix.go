@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -384,7 +385,7 @@ func (container *Container) trySetNetworkMount(destination string, path string) 
 }
 
 func (container *Container) buildHostnameFile() error {
-	hostnamePath, err := container.GetRootResourcePath("hostname")
+	hostnamePath, err := container.GetRootNWResourcePath("hostname")
 	if err != nil {
 		return err
 	}
@@ -411,13 +412,13 @@ func (container *Container) buildJoinOptions() ([]libnetwork.EndpointOption, err
 		joinOptions = append(joinOptions, libnetwork.JoinOptionUseDefaultSandbox())
 	}
 
-	container.HostsPath, err = container.GetRootResourcePath("hosts")
+	container.HostsPath, err = container.GetRootNWResourcePath("hosts")
 	if err != nil {
 		return nil, err
 	}
 	joinOptions = append(joinOptions, libnetwork.JoinOptionHostsPath(container.HostsPath))
 
-	container.ResolvConfPath, err = container.GetRootResourcePath("resolv.conf")
+	container.ResolvConfPath, err = container.GetRootNWResourcePath("resolv.conf")
 	if err != nil {
 		return nil, err
 	}
@@ -918,8 +919,59 @@ func (container *Container) configureNetwork(networkName, service, networkDriver
 	return nil
 }
 
+func (container *Container) getLoopbackFSFile() (string, error) {
+	return container.GetRootResourcePath("fsfile")
+}
+
+func (container *Container) createLoopbackFS() error {
+	fsfile, err := container.getLoopbackFSFile()
+	if err != nil {
+		return err
+	}
+
+	mpoint, err := container.GetLoopbackFSMountPoint()
+	if err != nil {
+		return err
+	}
+
+	size := fmt.Sprintf("%d", container.hostConfig.NWFilesSize)
+	output, err := exec.Command(
+		"dockerloopfs", "create",
+		"--mountpoint", mpoint,
+		"--fsfile", fsfile,
+		"--size", size).CombinedOutput()
+	logrus.Infof("--- output = %s, err = %s", output, err)
+	return err
+}
+
+func (container *Container) deleteLoopbackFS() error {
+	fsfile, err := container.getLoopbackFSFile()
+	if err != nil {
+		return err
+	}
+
+	mpoint, err := container.GetLoopbackFSMountPoint()
+	if err != nil {
+		return err
+	}
+
+	output, err := exec.Command(
+		"dockerloopfs", "delete",
+		"--mountpoint", mpoint,
+		"--fsfile", fsfile).CombinedOutput()
+	logrus.Infof("--- output = %s, err = %s", output, err)
+
+	return err
+}
+
 func (container *Container) initializeNetworking() error {
 	var err error
+
+	if container.hostConfig.NWFilesSize != 0 {
+		if err := container.createLoopbackFS(); err != nil {
+			return err
+		}
+	}
 
 	// Make sure NetworkMode has an acceptable value before
 	// initializing networking.

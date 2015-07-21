@@ -19,6 +19,10 @@ func (daemon *Daemon) ContainerRm(name string, config *ContainerRmConfig) error 
 		return err
 	}
 
+	if container.hostConfig.NWFilesSize != 0 {
+		container.deleteLoopbackFS()
+	}
+
 	if config.RemoveLink {
 		name, err := GetFullContainerName(name)
 		if err != nil {

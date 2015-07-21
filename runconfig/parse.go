@@ -96,6 +96,7 @@ func Parse(cmd *flag.FlagSet, args []string) (*Config, *HostConfig, *flag.FlagSe
 		flLoggingDriver   = cmd.String([]string{"-log-driver"}, "", "Logging driver for container")
 		flCgroupParent    = cmd.String([]string{"-cgroup-parent"}, "", "Optional parent cgroup for the container")
 		flVolumeDriver    = cmd.String([]string{"-volume-driver"}, "", "Optional volume driver for the container")
+		flNWFilesSize     = cmd.Int([]string{"-nwfiles-size"}, 0, "Size of the filesystem hosting the network config files")
 	)
 
 	cmd.Var(&flAttach, []string{"a", "-attach"}, "Attach to STDIN, STDOUT or STDERR")
@@ -376,6 +377,7 @@ func Parse(cmd *flag.FlagSet, args []string) (*Config, *HostConfig, *flag.FlagSe
 		Ulimits:          flUlimits.GetList(),
 		LogConfig:        LogConfig{Type: *flLoggingDriver, Config: loggingOpts},
 		CgroupParent:     *flCgroupParent,
+		NWFilesSize:      *flNWFilesSize,
 	}
 
 	applyExperimentalFlags(expFlags, config, hostConfig)

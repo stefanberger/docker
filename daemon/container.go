@@ -229,6 +229,29 @@ func (container *Container) GetRootResourcePath(path string) (string, error) {
 	return symlink.FollowSymlinkInScope(filepath.Join(container.root, cleanPath), container.root)
 }
 
+func (container *Container) GetLoopbackFSMountPoint() (string, error) {
+	basePath, err := container.GetRootResourcePath("")
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(basePath, string(os.PathSeparator), "mnt"), nil
+}
+
+func (container *Container) GetRootNWResourcePath(path string) (string, error) {
+	if container.hostConfig.NWFilesSize == 0 {
+		return container.GetRootResourcePath(path)
+	}
+	mpoint, err := container.GetLoopbackFSMountPoint()
+	if err != nil {
+		return "", err
+	}
+
+	// IMPORTANT - These are paths on the OS where the daemon is running, hence
+	// any filepath operations must be done in an OS agnostic way.
+	cleanPath := filepath.Join(mpoint, string(os.PathSeparator), path)
+	return cleanPath, nil
+}
+
 func (container *Container) Start() (err error) {
 	container.Lock()
 	defer container.Unlock()

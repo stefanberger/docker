@@ -1,0 +1,267 @@
+#!/bin/bash
+
+# Copyright (c) 2015 IBM Corporation
+#
+# Authors: Stefan Berger <stefanb@us.ibm.com>
+#
+
+FS_SIZE=100 # in kilobytes
+FS_TYPE=ext4
+
+# Create a file for the loopback mounted filesystem
+#
+# @param1: the filename of the file containing the filesystem
+# @param2: the size of the filesystem
+function create_fs()
+{
+	local fsfile="$1"
+	local fs_size="$2"
+
+	dd if=/dev/zero of=${fsfile} bs=1024 count=${fs_size} &>/dev/null
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+
+	mkfs.${FS_TYPE} ${fsfile} -F &>/dev/null
+	if [ $? -ne 0 ]; then
+		return 1
+	fi
+	return 0
+}
+
+# Create a new loopback device
+function create_loopdev()
+{
+	local minor
+
+	minor=$(ls -l /dev | \
+	        grep -e "disk[[:space:]]\+7," | \
+	        gawk '{print $6}' | \
+	        sort -n | \
+	        tail -1)
+	minor=$((minor + 1))
+
+	mknod -m 660 /dev/loop${minor} b 7 ${minor}
+}
+
+# Check whether the file is already mounted
+#
+# @param1: the mountpoint
+function is_mounted()
+{
+	local mountpoint="$1"
+
+	if [ -n "$(cat /proc/mounts | grep " ${mountpoint} ")" ]; then
+		return 0
+	fi
+
+	return 1
+}
+
+# Unmount and delete the filesystem
+# @param1: the filename of the file containing the filesystem
+# @param2: the mount point
+function umount_delete_fs()
+{
+	local fsfile="$1"
+	local mountpoint="$2"
+
+	umount "${mountpoint}" 2>/dev/null
+	rm -f ${fsfile}
+}
+
+# Create and mount the filesystem
+#
+# @param1: the filename of the file containing the filesystem
+# @param2: the mount point
+# @param3: the size of the file system
+function create_mount_fs()
+{
+	local fsfile="$1"
+	local mountpoint="$2"
+	local fs_size="$3"
+
+	local count ret
+
+	# if the mountpoint is already mounted, we do not do
+	# anything here; return success in this case
+	if is_mounted "$mountpoint"; then
+		return 0
+	fi
+
+	if [ ! -r ${fsfile} ]; then
+		create_fs "${fsfile}" "$fs_size"
+		ret=$?
+		if [ $ret -ne 0 ]; then
+			return 1
+		fi
+	fi
+
+	if [ -e "$mountpoint" ] && [ ! -d "$mountpoint" ]; then
+		return 1
+	fi
+
+	if [ ! -e "$mountpoint" ]; then
+		mkdir -p "$mountpoint"
+		if [ $? -ne 0 ]; then
+			echo "Error: Could not create mountpoint dir $mountpoint" >&2
+			return 1
+		fi
+	fi
+
+	# loopback device available ?
+	if [ -z "$(losetup -f)" ]; then
+		create_loopdev
+	fi
+
+	for ((count = 0; count < 10 ; count++));
+	do
+		# Concurrency with other processes can prevent a successful
+		# mount if other process grabs the last loopback device;
+		# so try this a couple of times
+		mount -o loop ${fsfile} ${mountpoint} 2>/dev/null
+		ret=$?
+		if [ $ret -eq 0 ]; then
+			break
+		fi
+		create_loopdev
+	done
+
+	if [ $ret -ne 0 ]; then
+		return 1
+	fi
+
+	return 0
+}
+
+function usage()
+{
+	cat <<_EOF_
+Usage: $1 command options
+
+Utility to create a loopback mounted filesystem of given size. The
+filesystem will be mounted on a given mountpoint (directory) and the
+filesystem contents will be held in a given file.
+
+The following commands are support:
+
+create      : To create the loopback mounted filesystem
+
+delete      : To unmount the loopback mounted filesystem and delete its
+              file
+
+help        : Display this help screen and exit
+
+
+The following options can be provided:
+
+--fsfile    : The name of the file for where the filesystem will be create in;
+              this option is mandatory
+
+--mountpoint: The directory where to mount the filesystem on;
+              this option is mandatory
+
+--size      : The size for the filesystem in kb; default is $FS_SIZE kb;
+              this option is optional
+
+--help,-h,-?: Display this help screen and exit
+_EOF_
+}
+
+function main()
+{
+	local cmd fsfile mountpoint ret
+	local flags=0
+	local fs_size=$FS_SIZE
+
+	case "$1" in
+	delete|create)
+		cmd="$1"
+		;;
+	help)
+		usage "$(basename "$0")"
+		exit 0
+		;;
+	esac
+
+	shift
+
+	while [ $# -ge 1 ]; do
+		case "$1" in
+		--fsfile)
+			shift 1
+			fsfile="$1"
+			;;
+		--mountpoint)
+			shift 1
+			mountpoint="$1"
+			;;
+		--size)
+			shift 1
+			fs_size="$1"
+			if ! [[ $fs_size =~ ^[0-9]+$ ]]; then
+				echo "Invalid filesystem size '$fs_size'." >&2
+				exit 1
+			fi
+			;;
+		--help|-h|-?)
+			usage "$(basename "$0")"
+			exit 0
+			;;
+		esac
+		shift
+	done
+
+	if [ -z "$cmd" ]; then
+		echo "No command parameter given." >&2
+		usage "$(basename "$0")"
+		exit 1
+	fi
+
+	if [ $(id -u) -ne 0 ]; then
+		echo "You have to be root to run this program." >&2
+		exit 1
+	fi
+
+	if [ -z "${fsfile}" ]; then
+		echo "Error: Missing --fsfile parameter." >&2
+		exit 1
+	fi
+
+	if [ -z "${mountpoint}" ]; then
+		echo "Error: Missing --mountpoint parameter." >&2
+		exit 1
+	fi
+
+	fsfile="$(echo ${fsfile} | sed 's.//./.pg')"
+	mountpoint="$(echo ${mountpoint} | sed 's.//./.pg')"
+
+	case "$cmd" in
+	create)
+		if [ ! -d "$(basename "${fsfile}")" ]; then
+			mkdir -p "$(basename "${fsfile}")"
+			if [ $? -ne 0 ]; then
+				echo "Error: Could not create dir $(basename "${fsfile}")." >&2
+				exit 1
+			fi
+		fi
+		if [ ! -d "$(basename "${mountpoint}")" ]; then
+			mkdir -p "$(basename "${mountpoint}")"
+			if [ $? -ne 0 ]; then
+				echo "Error: Could not create dir $(basename "${mountpoint}")." >&2
+				exit 1
+			fi
+		fi
+		create_mount_fs "${fsfile}" "${mountpoint}" "${fs_size}"
+		ret=$?
+		;;
+	delete)
+		umount_delete_fs "${fsfile}" "${mountpoint}"
+		ret=0
+		;;
+	esac
+
+	return $ret
+}
+
+main "$@"
